@@ -196,15 +196,18 @@
             document.getElementById('dashboard-content').classList.add('hidden');
 
             fetch(SCRIPT_URL + '?action=getDashboardData')
-                .then(res => res.json())
+                .then(res => {
+                    if (!res.ok) { throw new Error(`Network response was not ok: ${res.statusText}`); }
+                    return res.json();
+                })
                 .then(response => {
-                    if (response.status === 'success') {
+                    if (response && response.status === 'success' && response.data) {
                         processDashboardData(response.data);
                         document.getElementById('loading-state').classList.add('hidden');
                         document.getElementById('dashboard-content').classList.remove('hidden');
                         document.getElementById('last-updated').textContent = new Date().toLocaleString();
                     } else {
-                        throw new Error(response.message);
+                        throw new Error(response.message || 'Received invalid data from server.');
                     }
                 })
                 .catch(error => {
@@ -216,15 +219,9 @@
         function processDashboardData(data) {
             const { documents, clients } = data;
             
-            // Clear existing charts if they exist to prevent duplicates on refresh
-            if (window.docsByTypeChart instanceof Chart) {
-                window.docsByTypeChart.destroy();
-            }
-            if (window.revenueOverTimeChart instanceof Chart) {
-                window.revenueOverTimeChart.destroy();
-            }
+            if (window.docsByTypeChart instanceof Chart) { window.docsByTypeChart.destroy(); }
+            if (window.revenueOverTimeChart instanceof Chart) { window.revenueOverTimeChart.destroy(); }
 
-            // 1. Process Key Metrics
             const totalRevenue = documents.filter(d => d.DocumentType === 'invoice').reduce((sum, doc) => sum + parseFloat(doc.Total || 0), 0);
             const totalReceipts = documents.filter(d => d.DocumentType === 'receipt').reduce((sum, doc) => sum + parseFloat(doc.Total || 0), 0);
             const totalClaims = documents.filter(d => d.DocumentType === 'claim').reduce((sum, doc) => sum + parseFloat(doc.Total || 0), 0);
@@ -238,14 +235,12 @@
             document.getElementById('total-invoices').textContent = totalInvoices;
             document.getElementById('total-clients').textContent = clients.length;
 
-            // 2. Process Data for Charts
             const docCounts = documents.reduce((acc, doc) => { acc[doc.DocumentType] = (acc[doc.DocumentType] || 0) + 1; return acc; }, {});
             createDocsByTypeChart(docCounts);
 
             const revenueData = documents.filter(d => d.DocumentType === 'invoice').map(d => ({ date: new Date(d.DocumentDate), amount: parseFloat(d.Total || 0) })).sort((a, b) => a.date - b.date);
             createRevenueOverTimeChart(revenueData);
             
-            // 3. Process Data for Tables
             const clientData = documents.reduce((acc, doc) => {
                 const clientName = doc.ClientName;
                 if (!acc[clientName]) { acc[clientName] = { totalValue: 0, docCount: 0 }; }
@@ -266,7 +261,7 @@
             const sortedClaims = Object.entries(claimData).sort(([, a], [, b]) => b.totalValue - a.totalValue).slice(0, 5);
             populateTopClaimsTable(sortedClaims);
             
-            const recentDocs = documents.sort((a, b) => new Date(b.Timestamp) - new Date(a.Timestamp)).slice(0, 10); // Show more recent docs
+            const recentDocs = documents.sort((a, b) => new Date(b.Timestamp) - new Date(a.Timestamp)).slice(0, 10);
             populateRecentDocsTable(recentDocs);
         }
 
@@ -315,16 +310,11 @@
                         <td class="p-3">${doc.ClientName}</td>
                         <td class="p-3 text-right">RM ${parseFloat(doc.Total || 0).toFixed(2)}</td>
                         <td class="p-3 text-right">
-                            <button onclick="editDocument('${doc.DocumentNumber}')" class="text-indigo-600 hover:text-indigo-900 mr-3" title="Edit"><i class="fas fa-pen"></i></button>
                             <button onclick="showDeleteModal('${doc.DocumentNumber}')" class="text-red-600 hover:text-red-900" title="Delete"><i class="fas fa-trash"></i></button>
                         </td>
                     </tr>`;
                 tableBody.innerHTML += row;
             });
-        }
-
-        function editDocument(docId) {
-            window.location.href = `index.html?docId=${docId}`;
         }
 
         function deleteDocument(docId) {
@@ -333,7 +323,10 @@
             confirmBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Deleting...';
 
             fetch(SCRIPT_URL + '?action=deleteDocument&id=' + docId, { method: 'POST' })
-              .then(res => res.json())
+              .then(res => {
+                  if (!res.ok) { throw new Error(`Server error: ${res.statusText}`); }
+                  return res.json();
+              })
               .then(data => {
                   if (data.status === 'success') {
                       showNotification('Document deleted successfully.', 'success');
@@ -344,7 +337,7 @@
               })
               .catch(error => {
                   console.error('Error deleting document:', error);
-                  showNotification(`Error: ${error.message}`, 'error');
+                  showNotification(`Error: ${error.message || 'Could not delete document.'}`, 'error');
               })
               .finally(() => {
                   hideDeleteModal();
@@ -379,8 +372,11 @@
             banner.classList.remove('hidden');
             
             setTimeout(() => {
-                banner.classList.add('translate-x-full');
-                 setTimeout(() => { banner.classList.add('hidden'); }, 300);
+                banner.style.transform = 'translateX(100%)';
+                 setTimeout(() => { 
+                     banner.classList.add('hidden');
+                     banner.style.transform = '';
+                 }, 300);
             }, 3000);
         }
 
