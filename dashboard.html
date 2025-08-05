@@ -41,7 +41,7 @@
         <!-- Main Content: Data Loaded -->
         <div id="dashboard-content" class="hidden">
             <!-- Key Metrics -->
-            <div class="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
+            <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
                 <div class="bg-white p-6 rounded-lg shadow text-center">
                     <h3 class="text-gray-500 text-sm font-medium">Total Revenue (Invoiced)</h3>
                     <p id="total-revenue" class="text-3xl font-bold mt-1">RM 0.00</p>
@@ -49,6 +49,10 @@
                 <div class="bg-white p-6 rounded-lg shadow text-center">
                     <h3 class="text-gray-500 text-sm font-medium">Total Receipts (Collected)</h3>
                     <p id="total-receipts" class="text-3xl font-bold mt-1 text-green-600">RM 0.00</p>
+                </div>
+                <div class="bg-white p-6 rounded-lg shadow text-center">
+                    <h3 class="text-gray-500 text-sm font-medium">Total Claims</h3>
+                    <p id="total-claims" class="text-3xl font-bold mt-1 text-red-600">RM 0.00</p>
                 </div>
                 <div class="bg-white p-6 rounded-lg shadow text-center">
                     <h3 class="text-gray-500 text-sm font-medium">Total Quotations</h3>
@@ -77,22 +81,41 @@
             </div>
 
             <!-- Tables -->
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                <div class="bg-white p-6 rounded-lg shadow">
-                    <h3 class="font-semibold mb-4">Top Clients by Invoice Value</h3>
-                    <div class="overflow-x-auto">
-                        <table class="w-full text-sm text-left">
-                            <thead class="bg-gray-50">
-                                <tr>
-                                    <th class="p-3 font-medium">Client Name</th>
-                                    <th class="p-3 font-medium text-right">Total Value</th>
-                                    <th class="p-3 font-medium text-center">Docs</th>
-                                </tr>
-                            </thead>
-                            <tbody id="top-clients-table">
-                                <!-- JS will populate this -->
-                            </tbody>
-                        </table>
+            <div class="space-y-8">
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    <div class="bg-white p-6 rounded-lg shadow">
+                        <h3 class="font-semibold mb-4">Top Clients by Invoice Value</h3>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-sm text-left">
+                                <thead class="bg-gray-50">
+                                    <tr>
+                                        <th class="p-3 font-medium">Client Name</th>
+                                        <th class="p-3 font-medium text-right">Total Value</th>
+                                        <th class="p-3 font-medium text-center">Docs</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="top-clients-table">
+                                    <!-- JS will populate this -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="bg-white p-6 rounded-lg shadow">
+                        <h3 class="font-semibold mb-4">Top Claims by Claim Value</h3>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-sm text-left">
+                                <thead class="bg-gray-50">
+                                    <tr>
+                                        <th class="p-3 font-medium">Client Name</th>
+                                        <th class="p-3 font-medium text-right">Total Value</th>
+                                        <th class="p-3 font-medium text-center">Claims</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="top-claims-table">
+                                    <!-- JS will populate this -->
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
                 <div class="bg-white p-6 rounded-lg shadow">
@@ -119,12 +142,19 @@
     </div>
 
     <script>
+        // The Google Apps Script URL to fetch data from.
         const SCRIPT_URL = "https://script.google.com/macros/s/AKfycby3__y-rXVCvCUDrfpcg1JkAAJr_gkW95ktfYi9ybuxn-3kru-HiezQbTaXF6T3olZ3Kw/exec";
 
+        /**
+         * Fetches and processes dashboard data when the page loads.
+         */
         document.addEventListener('DOMContentLoaded', () => {
             fetchDashboardData();
         });
 
+        /**
+         * Fetches the complete dataset from the Google Apps Script endpoint.
+         */
         function fetchDashboardData() {
             fetch(SCRIPT_URL + '?action=getDashboardData')
                 .then(res => res.json())
@@ -144,6 +174,10 @@
                 });
         }
 
+        /**
+         * Processes the raw data and populates the dashboard components.
+         * @param {object} data - The data object from the API, containing documents and clients.
+         */
         function processDashboardData(data) {
             const { documents, clients } = data;
             
@@ -154,11 +188,15 @@
             const totalReceipts = documents
                 .filter(d => d.DocumentType === 'receipt')
                 .reduce((sum, doc) => sum + parseFloat(doc.Total || 0), 0);
+            const totalClaims = documents
+                .filter(d => d.DocumentType === 'claim')
+                .reduce((sum, doc) => sum + parseFloat(doc.Total || 0), 0);
             const totalQuotations = documents.filter(d => d.DocumentType === 'quotation').length;
             const totalInvoices = documents.filter(d => d.DocumentType === 'invoice').length;
             
             document.getElementById('total-revenue').textContent = `RM ${totalRevenue.toFixed(2)}`;
             document.getElementById('total-receipts').textContent = `RM ${totalReceipts.toFixed(2)}`;
+            document.getElementById('total-claims').textContent = `RM ${totalClaims.toFixed(2)}`;
             document.getElementById('total-quotations').textContent = totalQuotations;
             document.getElementById('total-invoices').textContent = totalInvoices;
             document.getElementById('total-clients').textContent = clients.length;
@@ -196,6 +234,24 @@
                 .sort(([, a], [, b]) => b.totalValue - a.totalValue)
                 .slice(0, 5); // Top 5
             populateTopClientsTable(sortedClients);
+
+            // Top Claims Table
+            const claimData = documents
+                .filter(doc => doc.DocumentType === 'claim')
+                .reduce((acc, doc) => {
+                    const clientName = doc.ClientName;
+                    if (!acc[clientName]) {
+                        acc[clientName] = { totalValue: 0, claimCount: 0 };
+                    }
+                    acc[clientName].totalValue += parseFloat(doc.Total || 0);
+                    acc[clientName].claimCount += 1;
+                    return acc;
+                }, {});
+            
+            const sortedClaims = Object.entries(claimData)
+                .sort(([, a], [, b]) => b.totalValue - a.totalValue)
+                .slice(0, 5); // Top 5
+            populateTopClaimsTable(sortedClaims);
             
             // Recent Documents Table
             const recentDocs = documents
@@ -204,6 +260,10 @@
             populateRecentDocsTable(recentDocs);
         }
 
+        /**
+         * Creates the 'Documents by Type' bar chart.
+         * @param {object} data - An object with document types as keys and counts as values.
+         */
         function createDocsByTypeChart(data) {
             const ctx = document.getElementById('docsByTypeChart').getContext('2d');
             new Chart(ctx, {
@@ -224,6 +284,10 @@
             });
         }
 
+        /**
+         * Creates the 'Revenue Over Time' line chart.
+         * @param {Array<object>} data - An array of objects with date and amount properties.
+         */
         function createRevenueOverTimeChart(data) {
             const ctx = document.getElementById('revenueOverTimeChart').getContext('2d');
             new Chart(ctx, {
@@ -247,12 +311,20 @@
             });
         }
         
+        /**
+         * Populates the 'Top Clients' table with data.
+         * @param {Array} clients - A sorted array of client data.
+         */
         function populateTopClientsTable(clients) {
             const tableBody = document.getElementById('top-clients-table');
-            tableBody.innerHTML = '';
+            tableBody.innerHTML = ''; // Clear existing rows
+            if (clients.length === 0) {
+                tableBody.innerHTML = '<tr><td colspan="3" class="p-3 text-center text-gray-500">No client data available.</td></tr>';
+                return;
+            }
             clients.forEach(([name, data]) => {
                 const row = `
-                    <tr class="border-b">
+                    <tr class="border-b hover:bg-gray-50">
                         <td class="p-3 font-medium">${name}</td>
                         <td class="p-3 text-right">RM ${data.totalValue.toFixed(2)}</td>
                         <td class="p-3 text-center">${data.docCount}</td>
@@ -262,14 +334,45 @@
             });
         }
 
+        /**
+         * Populates the 'Top Claims' table with data.
+         * @param {Array} claims - A sorted array of claim data.
+         */
+        function populateTopClaimsTable(claims) {
+            const tableBody = document.getElementById('top-claims-table');
+            tableBody.innerHTML = ''; // Clear existing rows
+            if (claims.length === 0) {
+                tableBody.innerHTML = '<tr><td colspan="3" class="p-3 text-center text-gray-500">No claim data available.</td></tr>';
+                return;
+            }
+            claims.forEach(([name, data]) => {
+                const row = `
+                    <tr class="border-b hover:bg-gray-50">
+                        <td class="p-3 font-medium">${name}</td>
+                        <td class="p-3 text-right">RM ${data.totalValue.toFixed(2)}</td>
+                        <td class="p-3 text-center">${data.claimCount}</td>
+                    </tr>
+                `;
+                tableBody.innerHTML += row;
+            });
+        }
+
+        /**
+         * Populates the 'Recent Documents' table with data.
+         * @param {Array<object>} docs - A sorted array of recent documents.
+         */
         function populateRecentDocsTable(docs) {
             const tableBody = document.getElementById('recent-docs-table');
-            tableBody.innerHTML = '';
+            tableBody.innerHTML = ''; // Clear existing rows
+            if (docs.length === 0) {
+                tableBody.innerHTML = '<tr><td colspan="5" class="p-3 text-center text-gray-500">No recent documents.</td></tr>';
+                return;
+            }
             docs.forEach(doc => {
                 const row = `
-                    <tr class="border-b">
+                    <tr class="border-b hover:bg-gray-50">
                         <td class="p-3">${new Date(doc.Timestamp).toLocaleDateString()}</td>
-                        <td class="p-3">${doc.DocumentType}</td>
+                        <td class="p-3 capitalize">${doc.DocumentType}</td>
                         <td class="p-3">${doc.DocumentNumber}</td>
                         <td class="p-3">${doc.ClientName}</td>
                         <td class="p-3 text-right">RM ${parseFloat(doc.Total || 0).toFixed(2)}</td>
