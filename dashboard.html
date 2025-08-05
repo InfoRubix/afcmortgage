@@ -12,13 +12,19 @@
         body {
             font-family: 'Inter', sans-serif;
         }
-        /* Styles for the confirmation modal */
-        #confirmation-modal {
-            transition: opacity 0.3s ease;
+        /* Styles for the confirmation modal and notification */
+        #confirmation-modal, #notification-banner {
+            transition: opacity 0.3s ease, transform 0.3s ease;
         }
     </style>
 </head>
 <body class="bg-gray-100 text-gray-800">
+
+    <!-- Notification Banner -->
+    <div id="notification-banner" class="hidden fixed top-5 right-5 z-50 p-4 rounded-md shadow-lg text-white transform translate-x-full">
+        <p id="notification-message"></p>
+    </div>
+
 
     <div class="container mx-auto p-4 sm:p-6 lg:p-8">
         <!-- Header -->
@@ -174,9 +180,6 @@
         // The Google Apps Script URL to fetch data from.
         const SCRIPT_URL = "https://script.google.com/macros/s/AKfycby3__y-rXVCvCUDrfpcg1JkAAJr_gkW95ktfYi9ybuxn-3kru-HiezQbTaXF6T3olZ3Kw/exec";
 
-        /**
-         * Fetches and processes dashboard data when the page loads.
-         */
         document.addEventListener('DOMContentLoaded', () => {
             fetchDashboardData();
 
@@ -188,10 +191,10 @@
             });
         });
 
-        /**
-         * Fetches the complete dataset from the Google Apps Script endpoint.
-         */
         function fetchDashboardData() {
+            document.getElementById('loading-state').classList.remove('hidden');
+            document.getElementById('dashboard-content').classList.add('hidden');
+
             fetch(SCRIPT_URL + '?action=getDashboardData')
                 .then(res => res.json())
                 .then(response => {
@@ -210,23 +213,21 @@
                 });
         }
 
-        /**
-         * Processes the raw data and populates the dashboard components.
-         * @param {object} data - The data object from the API, containing documents and clients.
-         */
         function processDashboardData(data) {
             const { documents, clients } = data;
             
+            // Clear existing charts if they exist to prevent duplicates on refresh
+            if (window.docsByTypeChart instanceof Chart) {
+                window.docsByTypeChart.destroy();
+            }
+            if (window.revenueOverTimeChart instanceof Chart) {
+                window.revenueOverTimeChart.destroy();
+            }
+
             // 1. Process Key Metrics
-            const totalRevenue = documents
-                .filter(d => d.DocumentType === 'invoice')
-                .reduce((sum, doc) => sum + parseFloat(doc.Total || 0), 0);
-            const totalReceipts = documents
-                .filter(d => d.DocumentType === 'receipt')
-                .reduce((sum, doc) => sum + parseFloat(doc.Total || 0), 0);
-            const totalClaims = documents
-                .filter(d => d.DocumentType === 'claim')
-                .reduce((sum, doc) => sum + parseFloat(doc.Total || 0), 0);
+            const totalRevenue = documents.filter(d => d.DocumentType === 'invoice').reduce((sum, doc) => sum + parseFloat(doc.Total || 0), 0);
+            const totalReceipts = documents.filter(d => d.DocumentType === 'receipt').reduce((sum, doc) => sum + parseFloat(doc.Total || 0), 0);
+            const totalClaims = documents.filter(d => d.DocumentType === 'claim').reduce((sum, doc) => sum + parseFloat(doc.Total || 0), 0);
             const totalQuotations = documents.filter(d => d.DocumentType === 'quotation').length;
             const totalInvoices = documents.filter(d => d.DocumentType === 'invoice').length;
             
@@ -238,90 +239,51 @@
             document.getElementById('total-clients').textContent = clients.length;
 
             // 2. Process Data for Charts
-            const docCounts = documents.reduce((acc, doc) => {
-                acc[doc.DocumentType] = (acc[doc.DocumentType] || 0) + 1;
-                return acc;
-            }, {});
+            const docCounts = documents.reduce((acc, doc) => { acc[doc.DocumentType] = (acc[doc.DocumentType] || 0) + 1; return acc; }, {});
             createDocsByTypeChart(docCounts);
 
-            const revenueData = documents
-                .filter(d => d.DocumentType === 'invoice')
-                .map(d => ({ date: new Date(d.DocumentDate), amount: parseFloat(d.Total || 0) }))
-                .sort((a, b) => a.date - b.date);
+            const revenueData = documents.filter(d => d.DocumentType === 'invoice').map(d => ({ date: new Date(d.DocumentDate), amount: parseFloat(d.Total || 0) })).sort((a, b) => a.date - b.date);
             createRevenueOverTimeChart(revenueData);
             
             // 3. Process Data for Tables
             const clientData = documents.reduce((acc, doc) => {
                 const clientName = doc.ClientName;
-                if (!acc[clientName]) {
-                    acc[clientName] = { totalValue: 0, docCount: 0 };
-                }
-                if (doc.DocumentType === 'invoice') {
-                    acc[clientName].totalValue += parseFloat(doc.Total || 0);
-                }
+                if (!acc[clientName]) { acc[clientName] = { totalValue: 0, docCount: 0 }; }
+                if (doc.DocumentType === 'invoice') { acc[clientName].totalValue += parseFloat(doc.Total || 0); }
                 acc[clientName].docCount += 1;
                 return acc;
             }, {});
-
-            const sortedClients = Object.entries(clientData)
-                .sort(([, a], [, b]) => b.totalValue - a.totalValue)
-                .slice(0, 5);
+            const sortedClients = Object.entries(clientData).sort(([, a], [, b]) => b.totalValue - a.totalValue).slice(0, 5);
             populateTopClientsTable(sortedClients);
 
-            const claimData = documents
-                .filter(doc => doc.DocumentType === 'claim')
-                .reduce((acc, doc) => {
-                    const clientName = doc.ClientName;
-                    if (!acc[clientName]) {
-                        acc[clientName] = { totalValue: 0, claimCount: 0 };
-                    }
-                    acc[clientName].totalValue += parseFloat(doc.Total || 0);
-                    acc[clientName].claimCount += 1;
-                    return acc;
-                }, {});
-            
-            const sortedClaims = Object.entries(claimData)
-                .sort(([, a], [, b]) => b.totalValue - a.totalValue)
-                .slice(0, 5);
+            const claimData = documents.filter(doc => doc.DocumentType === 'claim').reduce((acc, doc) => {
+                const clientName = doc.ClientName;
+                if (!acc[clientName]) { acc[clientName] = { totalValue: 0, claimCount: 0 }; }
+                acc[clientName].totalValue += parseFloat(doc.Total || 0);
+                acc[clientName].claimCount += 1;
+                return acc;
+            }, {});
+            const sortedClaims = Object.entries(claimData).sort(([, a], [, b]) => b.totalValue - a.totalValue).slice(0, 5);
             populateTopClaimsTable(sortedClaims);
             
-            const recentDocs = documents
-                .sort((a, b) => new Date(b.Timestamp) - new Date(a.Timestamp))
-                .slice(0, 5);
+            const recentDocs = documents.sort((a, b) => new Date(b.Timestamp) - new Date(a.Timestamp)).slice(0, 10); // Show more recent docs
             populateRecentDocsTable(recentDocs);
         }
 
         function createDocsByTypeChart(data) {
             const ctx = document.getElementById('docsByTypeChart').getContext('2d');
-            new Chart(ctx, {
+            window.docsByTypeChart = new Chart(ctx, {
                 type: 'bar',
-                data: {
-                    labels: Object.keys(data),
-                    datasets: [{
-                        label: 'Document Count',
-                        data: Object.values(data),
-                        backgroundColor: ['#3b82f6', '#16a34a', '#ef4444', '#f97316', '#8b5cf6'],
-                    }]
-                },
+                data: { labels: Object.keys(data), datasets: [{ label: 'Document Count', data: Object.values(data), backgroundColor: ['#3b82f6', '#16a34a', '#ef4444', '#f97316', '#8b5cf6'] }] },
                 options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
             });
         }
 
         function createRevenueOverTimeChart(data) {
             const ctx = document.getElementById('revenueOverTimeChart').getContext('2d');
-            new Chart(ctx, {
+            window.revenueOverTimeChart = new Chart(ctx, {
                 type: 'line',
-                data: {
-                    labels: data.map(d => d.date.toLocaleDateString('en-CA')),
-                    datasets: [{
-                        label: 'Invoice Revenue',
-                        data: data.map(d => d.amount),
-                        borderColor: '#16a34a',
-                        backgroundColor: 'rgba(22, 163, 74, 0.1)',
-                        fill: true,
-                        tension: 0.1
-                    }]
-                },
+                data: { labels: data.map(d => d.date.toLocaleDateString('en-CA')), datasets: [{ label: 'Invoice Revenue', data: data.map(d => d.amount), borderColor: '#16a34a', backgroundColor: 'rgba(22, 163, 74, 0.1)', fill: true, tension: 0.1 }] },
                 options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
             });
         }
@@ -329,106 +291,97 @@
         function populateTopClientsTable(clients) {
             const tableBody = document.getElementById('top-clients-table');
             tableBody.innerHTML = '';
-            if (clients.length === 0) {
-                tableBody.innerHTML = '<tr><td colspan="3" class="p-3 text-center text-gray-500">No client data available.</td></tr>';
-                return;
-            }
-            clients.forEach(([name, data]) => {
-                const row = `<tr class="border-b hover:bg-gray-50"><td class="p-3 font-medium">${name}</td><td class="p-3 text-right">RM ${data.totalValue.toFixed(2)}</td><td class="p-3 text-center">${data.docCount}</td></tr>`;
-                tableBody.innerHTML += row;
-            });
+            if (clients.length === 0) { tableBody.innerHTML = '<tr><td colspan="3" class="p-3 text-center text-gray-500">No client data available.</td></tr>'; return; }
+            clients.forEach(([name, data]) => { tableBody.innerHTML += `<tr class="border-b hover:bg-gray-50"><td class="p-3 font-medium">${name}</td><td class="p-3 text-right">RM ${data.totalValue.toFixed(2)}</td><td class="p-3 text-center">${data.docCount}</td></tr>`; });
         }
 
         function populateTopClaimsTable(claims) {
             const tableBody = document.getElementById('top-claims-table');
             tableBody.innerHTML = '';
-            if (claims.length === 0) {
-                tableBody.innerHTML = '<tr><td colspan="3" class="p-3 text-center text-gray-500">No claim data available.</td></tr>';
-                return;
-            }
-            claims.forEach(([name, data]) => {
-                const row = `<tr class="border-b hover:bg-gray-50"><td class="p-3 font-medium">${name}</td><td class="p-3 text-right">RM ${data.totalValue.toFixed(2)}</td><td class="p-3 text-center">${data.claimCount}</td></tr>`;
-                tableBody.innerHTML += row;
-            });
+            if (claims.length === 0) { tableBody.innerHTML = '<tr><td colspan="3" class="p-3 text-center text-gray-500">No claim data available.</td></tr>'; return; }
+            claims.forEach(([name, data]) => { tableBody.innerHTML += `<tr class="border-b hover:bg-gray-50"><td class="p-3 font-medium">${name}</td><td class="p-3 text-right">RM ${data.totalValue.toFixed(2)}</td><td class="p-3 text-center">${data.claimCount}</td></tr>`; });
         }
 
         function populateRecentDocsTable(docs) {
             const tableBody = document.getElementById('recent-docs-table');
             tableBody.innerHTML = '';
-            if (docs.length === 0) {
-                tableBody.innerHTML = '<tr><td colspan="6" class="p-3 text-center text-gray-500">No recent documents.</td></tr>';
-                return;
-            }
+            if (docs.length === 0) { tableBody.innerHTML = '<tr><td colspan="6" class="p-3 text-center text-gray-500">No recent documents.</td></tr>'; return; }
             docs.forEach(doc => {
                 const row = `
-                    <tr class="border-b hover:bg-gray-50">
+                    <tr class="border-b hover:bg-gray-50" id="doc-row-${doc.DocumentNumber}">
                         <td class="p-3">${new Date(doc.Timestamp).toLocaleDateString()}</td>
                         <td class="p-3 capitalize">${doc.DocumentType}</td>
                         <td class="p-3">${doc.DocumentNumber}</td>
                         <td class="p-3">${doc.ClientName}</td>
                         <td class="p-3 text-right">RM ${parseFloat(doc.Total || 0).toFixed(2)}</td>
                         <td class="p-3 text-right">
-                            <button onclick="editDocument('${doc.DocumentNumber}')" class="text-indigo-600 hover:text-indigo-900 mr-3" title="Edit">
-                                <i class="fas fa-pen"></i>
-                            </button>
-                            <button onclick="showDeleteModal('${doc.DocumentNumber}')" class="text-red-600 hover:text-red-900" title="Delete">
-                                <i class="fas fa-trash"></i>
-                            </button>
+                            <button onclick="editDocument('${doc.DocumentNumber}')" class="text-indigo-600 hover:text-indigo-900 mr-3" title="Edit"><i class="fas fa-pen"></i></button>
+                            <button onclick="showDeleteModal('${doc.DocumentNumber}')" class="text-red-600 hover:text-red-900" title="Delete"><i class="fas fa-trash"></i></button>
                         </td>
-                    </tr>
-                `;
+                    </tr>`;
                 tableBody.innerHTML += row;
             });
         }
 
-        /**
-         * Placeholder for editing a document.
-         * In a real application, this would likely redirect to an edit page.
-         * @param {string} docId - The ID of the document to edit.
-         */
         function editDocument(docId) {
-            console.log(`Navigating to edit page for document: ${docId}`);
-            // Example: window.location.href = `/edit-document?id=${docId}`;
-            alert(`Edit functionality for document ${docId} is not yet implemented.`);
+            window.location.href = `index.html?docId=${docId}`;
         }
 
-        /**
-         * Placeholder for deleting a document.
-         * In a real application, this would make an API call to the backend.
-         * @param {string} docId - The ID of the document to delete.
-         */
         function deleteDocument(docId) {
-            console.log(`Deleting document: ${docId}`);
-            // Example API call:
-            // fetch(SCRIPT_URL + '?action=deleteDocument&id=' + docId, { method: 'POST' })
-            //   .then(res => res.json())
-            //   .then(data => {
-            //       console.log(data);
-            //       hideDeleteModal();
-            //       fetchDashboardData(); // Refresh data
-            //   })
-            //   .catch(error => console.error('Error:', error));
-            alert(`Delete functionality for document ${docId} is not yet implemented.`);
-            hideDeleteModal();
+            const confirmBtn = document.getElementById('confirm-delete-btn');
+            confirmBtn.disabled = true;
+            confirmBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Deleting...';
+
+            fetch(SCRIPT_URL + '?action=deleteDocument&id=' + docId, { method: 'POST' })
+              .then(res => res.json())
+              .then(data => {
+                  if (data.status === 'success') {
+                      showNotification('Document deleted successfully.', 'success');
+                      fetchDashboardData(); // Refresh data after deletion
+                  } else {
+                      throw new Error(data.message || 'Unknown error during deletion.');
+                  }
+              })
+              .catch(error => {
+                  console.error('Error deleting document:', error);
+                  showNotification(`Error: ${error.message}`, 'error');
+              })
+              .finally(() => {
+                  hideDeleteModal();
+                  confirmBtn.disabled = false;
+                  confirmBtn.textContent = 'Delete';
+              });
         }
 
-        /**
-         * Shows the delete confirmation modal.
-         * @param {string} docId - The ID of the document to be deleted.
-         */
         function showDeleteModal(docId) {
             const modal = document.getElementById('confirmation-modal');
-            const confirmBtn = document.getElementById('confirm-delete-btn');
-            confirmBtn.dataset.docId = docId; // Store the id in the button's data attribute
+            document.getElementById('confirm-delete-btn').dataset.docId = docId;
             modal.classList.remove('hidden');
         }
 
-        /**
-         * Hides the delete confirmation modal.
-         */
         function hideDeleteModal() {
-            const modal = document.getElementById('confirmation-modal');
-            modal.classList.add('hidden');
+            document.getElementById('confirmation-modal').classList.add('hidden');
+        }
+
+        function showNotification(message, type = 'success') {
+            const banner = document.getElementById('notification-banner');
+            const messageEl = document.getElementById('notification-message');
+
+            messageEl.textContent = message;
+            banner.className = 'fixed top-5 right-5 z-50 p-4 rounded-md shadow-lg text-white transform-none';
+            
+            if (type === 'success') {
+                banner.classList.add('bg-green-500');
+            } else {
+                banner.classList.add('bg-red-500');
+            }
+
+            banner.classList.remove('hidden');
+            
+            setTimeout(() => {
+                banner.classList.add('translate-x-full');
+                 setTimeout(() => { banner.classList.add('hidden'); }, 300);
+            }, 3000);
         }
 
     </script>
